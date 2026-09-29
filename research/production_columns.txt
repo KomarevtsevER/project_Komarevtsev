@@ -1,0 +1,22 @@
+=== Список признаков для Production-модели ===
+Количество: 16
+
+Названия:
+  1. num__ram
+  2. num__battery_power
+  3. num__px_height
+  4. num__px_width
+  5. num__sc_h
+  6. num__sc_w
+  7. num__mobile_wt
+  8. cat__four_g
+  9. cat__wifi
+  10. cat__touch_screen
+  11. cat__dual_sim
+  12. poly__ram
+  13. poly__battery_power
+  14. poly__ram battery_power
+  15. binner__mobile_wt
+  16. binner__sc_h
+
+Индексы: [9, 0, 7, 8, 10, 11, 5, 19, 23, 22, 18, 24, 25, 26, 27, 28]

@@ -1,3 +1,6 @@
 .venv*
 *.pkl
 *.csv
+mlruns.db
+*/mlartifacts
+*/catboost_info
