@@ -4,3 +4,6 @@
 mlruns.db
 */mlartifacts
 */catboost_info
+.idea
+__pycache__/
+*.pyc
