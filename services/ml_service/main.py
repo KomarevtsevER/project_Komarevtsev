@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import FastAPI
+from prometheus_client import Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, ConfigDict, Field
 
 from api_handler import FastAPIHandler
@@ -32,6 +34,13 @@ class PhoneFeatures(BaseModel):
     wifi: Literal[0, 1]
 
 
+prediction_histogram = Histogram(
+    "mobile_price_prediction",
+    "Distribution of predicted mobile phone price classes",
+    buckets=(0.5, 1.5, 2.5, 3.5),
+)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.handler = FastAPIHandler()
@@ -39,6 +48,20 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+instrumentator = Instrumentator(
+    should_group_status_codes=False,
+    excluded_handlers=[
+        r"^/metrics$",
+        r"^/$",
+    ],
+)
+
+instrumentator.instrument(app).expose(
+    app,
+    include_in_schema=False,
+)
 
 
 @app.get("/")
@@ -52,7 +75,9 @@ def make_prediction(item_id: int, item_features: PhoneFeatures):
         item_features.model_dump()
     )
 
+    prediction_histogram.observe(prediction)
+
     return {
         "item_id": item_id,
-        "predict": prediction
+        "predict": prediction,
     }

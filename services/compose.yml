@@ -1,0 +1,81 @@
+name: mobile-price-lab4
+
+services:
+  ml_service:
+    build:
+      context: ./ml_service
+    image: mobile-price-service:2
+
+    ports:
+      - "8001:8000"
+
+    volumes:
+      - ./models:/models:ro
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  requests:
+    build:
+      context: ./requests
+    image: mobile-price-requests:1
+
+    environment:
+      API_URL: "http://ml_service:8000/api/prediction"
+      PYTHONUNBUFFERED: "1"
+
+    depends_on:
+      ml_service:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus
+
+    ports:
+      - "9090:9090"
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+
+    depends_on:
+      ml_service:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana
+
+    ports:
+      - "3000:3000"
+
+    environment:
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+    depends_on:
+      - prometheus
+
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:

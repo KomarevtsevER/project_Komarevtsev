@@ -3,6 +3,10 @@
 Exploratory Data Analysis (EDA) датасета **Mobile Price Classification** с Kaggle.  
 Проект включает разведочный анализ данных (ЛР1), обучение и сравнение моделей с логированием в MLflow (ЛР2), а также REST API на FastAPI для определения ценовой категории телефона с запуском в Docker (ЛР3).
 
+В ЛР4 проект дополнен генератором запросов, совместным запуском сервисов через Docker Compose и мониторингом через Prometheus и Grafana. [Запуск и результаты ЛР4](#лр4-docker-compose-и-мониторинг).
+
+**Технологии проекта:** Python 3.12, pandas, NumPy, matplotlib, seaborn, Bokeh, scikit-learn, CatBoost, AutoFeat, Optuna, MLflow, FastAPI, Pydantic, Uvicorn, cloudpickle, HTTPX, Docker, Docker Compose, prometheus-client, prometheus-fastapi-instrumentator, Prometheus и Grafana.
+
 ## Установка и запуск
 
 ### 1. Клонирование репозитория
@@ -332,3 +336,110 @@ uvicorn main:app --reload
 docker ps -a --filter name=mobile-price-service
 docker logs --tail 50 mobile-price-service
 ```
+
+## Docker Compose и мониторинг
+
+К API добавлены генератор запросов, сбор метрик Prometheus и дашборд Grafana. Сервис предсказаний обновлён до образа `mobile-price-service:2`. Разделы выше сохраняют описание и команды ЛР1–ЛР3; совместный запуск текущей системы описан ниже.
+
+### Сервисы и адреса
+
+| Сервис | Назначение | Веб-интерфейс |
+|---|---|---|
+| `ml_service` | Предсказания и экспорт метрик | [Swagger](http://localhost:8001/docs) · [Метрики](http://localhost:8001/metrics) |
+| `requests` | Генерация телефонов и отправка POST-запросов со случайными паузами 0–5 секунд | Нет |
+| `prometheus` | Сбор метрик API каждые 15 секунд и хранение истории | [Prometheus](http://localhost:9090) · [Targets](http://localhost:9090/targets) |
+| `grafana` | Дашборд нагрузки, ошибок, ресурсов и распределения предсказаний | [Grafana](http://localhost:3000) |
+
+PostgreSQL и pgAdmin не подключались: необязательный раздел с БД пропущен.
+
+### Новые файлы и изменения
+
+| Файл или папка | Содержимое |
+|---|---|
+| [services/compose.yml](services/compose.yml) | Запуск четырёх сервисов, порты, тома и проверка готовности API |
+| [services/requests/requests.py](services/requests/requests.py) | Генератор характеристик телефонов и HTTP-запросов через HTTPX |
+| [services/requests/Dockerfile](services/requests/Dockerfile) и [requirements.txt](services/requests/requirements.txt) | Образ генератора `mobile-price-requests:1` и его зависимости |
+| [services/prometheus/prometheus.yml](services/prometheus/prometheus.yml) | Сбор метрик с `ml_service:8000/metrics` |
+| `services/prometheus/screenshots/` | Скриншоты трёх графиков Prometheus |
+| [services/grafana/mobile-price-dashboard.json](services/grafana/mobile-price-dashboard.json) | Переносимый экспорт дашборда: шесть панелей и десять PromQL-запросов |
+| [services/grafana/Dashboard.png](services/grafana/Dashboard.png) | Скриншот дашборда |
+
+В `services/ml_service/main.py` добавлены HTTP-метрики и гистограмма `mobile_price_prediction` с границами `0.5`, `1.5`, `2.5`, `3.5`. Зависимости мониторинга записаны в сервисный `requirements.txt`.
+
+### Запуск через Docker Compose
+
+Нужны работающий Docker Desktop и файл `services/models/model.pkl`, подготовленный  выше. Порты 8001, 9090 и 3000 должны быть свободны.
+
+Из корня проекта:
+
+```bash
+cd services
+docker compose up -d --build
+docker compose ps
+```
+
+В [Targets Prometheus](http://localhost:9090/targets) цель `ml_service` должна иметь статус **UP**. Генератор запускается автоматически после готовности API.
+
+Команды из папки `services`:
+
+```bash
+docker compose logs --tail 20 requests     # Последние ответы генератора
+docker compose logs --tail 50 ml_service   # Логи API
+docker compose stop                       # Остановить контейнеры
+docker compose up -d                       # Запустить снова
+docker compose down                       # Удалить контейнеры, сохранив тома
+```
+
+Модель подключена к `/models` только для чтения. История Prometheus хранится в томе `prometheus_data`, настройки Grafana — в `grafana_data`. Команда `docker compose down -v` удаляет эти тома вместе с данными.
+
+### Подключение и восстановление дашборда Grafana
+
+1. Откройте [Grafana](http://localhost:3000). Начальные данные входа — `admin / admin`; если пароль изменён, используйте свой.
+2. В **Connections → Add new connection** добавьте источник **Prometheus** с адресом `http://prometheus:9090` и нажмите **Save & test**.
+3. В **Dashboards → New → Import dashboard** загрузите `services/grafana/mobile-price-dashboard.json` и выберите созданный источник Prometheus.
+
+Внутри Compose контейнеры обращаются друг к другу по имени сервиса: Grafana использует `prometheus:9090`, генератор — `ml_service:8000`.
+
+### Дашборд Grafana
+
+![Mobile Price Service Monitoring](services/grafana/Dashboard.png)
+
+Дашборд показывает последние 15 минут и обновляется каждые 15 секунд.
+
+| График | Что показывает | Уровень мониторинга |
+|---|---|---|
+| Prediction API Request Rate | Частота POST-запросов к API, запросов в минуту | Прикладной |
+| HTTP Errors by Status Group — Last 5 Minutes | Число ответов `4xx` и `5xx` за скользящие 5 минут | Прикладной |
+| Mean Prediction API Latency | Среднее время обработки запроса к API, миллисекунды | Прикладной |
+| ML Service Process Memory | Резидентная память Python-процесса API | Инфраструктурный |
+| ML Service Process CPU Usage | Использование CPU процессом API относительно одного логического CPU | Инфраструктурный |
+| Prediction Distribution by Price Class — Last 5 Minutes | Число предсказаний каждого класса за скользящие 5 минут | Поведение модели |
+
+Распределение ответов помогает замечать изменения поведения модели, но не измеряет accuracy/F1 и само по себе не доказывает сдвиг данных. Для оценки точности нужны правильные ответы. Значения `increase()` могут быть дробными из-за расчёта прироста счётчиков на границах временного окна.
+
+Для проверки ошибок отправьте запрос без обязательных признаков — API вернёт **422**:
+
+```bash
+curl -i -X POST "http://localhost:8001/api/prediction?item_id=999" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+### Графики Prometheus
+
+<details>
+<summary>Посмотреть три графика</summary>
+
+**Prediction Distribution by Price Class.** Число предсказаний каждого класса за предыдущие 5 минут. Отдельные классы получены вычитанием соседних накопительных корзин гистограммы.
+
+![Распределение предсказаний](services/prometheus/screenshots/Prediction%20Distribution%20by%20Price%20Class.png)
+
+**Prediction API Request Rate.** Частота запросов к endpoint-у предсказаний, запросов в минуту.
+
+![Частота запросов](services/prometheus/screenshots/Prediction%20API%20Request%20Rate.png)
+
+**HTTP Errors by Status Group.** Число ответов `4xx` и `5xx` за скользящие 5 минут.
+
+![Ошибки HTTP](services/prometheus/screenshots/HTTP%20Errors%20by%20Status%20Group.png)
+
+</details>
